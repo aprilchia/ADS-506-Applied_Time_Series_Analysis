@@ -1,0 +1,158 @@
+---
+title: "ADS506 Module 4 – EDA & Preprocessing"
+format:
+  pdf:
+    toc: true
+    number-sections: true
+    keep-tex: false
+---
+
+```{r install}
+install.packages("fpp3")
+install.packages("readr")
+install.packages("lubridate")
+```
+
+```{r libraries}
+library(fpp3)
+library(readr)
+library(lubridate)
+```
+
+```{r import_data}
+data_raw <- read_csv("NYPD_Complaint_Data_Current_(Year_To_Date).csv")
+```
+
+```{r clean_dates}
+
+# convert to Date
+data_raw$CMPLNT_FR_DT <- mdy(data_raw$CMPLNT_FR_DT)
+
+# drop rows with bad dates
+data_clean <- data_raw[!is.na(data_raw$CMPLNT_FR_DT), ]
+
+# keep needed columns
+data_clean <- data_clean[, c("CMPLNT_FR_DT", "BORO_NM", "LAW_CAT_CD")]
+```
+
+```{r filter_data}
+# filter brooklyn
+brooklyn <- data_clean[data_clean$BORO_NM == "BROOKLYN", ]
+
+# filter felony
+brooklyn_felony <- brooklyn[brooklyn$LAW_CAT_CD == "FELONY", ]
+
+```
+
+```{r rebuild}
+# convert correct date column
+data_raw$Date <- mdy(data_raw$RPT_DT)
+
+# drop rows with bad dates
+data_clean <- data_raw[!is.na(data_raw$Date), ]
+
+# keep only needed columns
+data_clean <- data_clean[, c("Date", "BORO_NM", "LAW_CAT_CD")]
+```
+
+```{r filter}
+# filter brooklyn
+brooklyn <- data_clean[data_clean$BORO_NM == "BROOKLYN", ]
+
+# filter felony
+brooklyn_felony <- brooklyn[brooklyn$LAW_CAT_CD == "FELONY", ]
+```
+
+```{r daily_counts}
+# count daily felony complaints
+daily_counts <- brooklyn_felony |>
+  count(Date, name = "Total")
+```
+
+```{r tsibble}
+# build tsibble
+daily_ts <- daily_counts |>
+  as_tsibble(index = Date)
+```
+
+```{r plot_raw}
+# plot daily felony complaints in Brooklyn
+autoplot(daily_ts, Total) +
+  labs(
+    title = "Daily Felony Complaint Counts in Brooklyn (2025)",
+    subtitle = "Aggregated from NYPD Complaint Data (Year-to-Date)",
+    x = "Date",
+    y = "Number of Felony Complaints"
+  ) +
+  theme_minimal()
+```
+
+```{r add_wday}
+# add weekday column for seasonality exploration
+daily_ts <- daily_ts %>%
+  mutate(
+    wday = wday(Date, label = TRUE)
+  )
+```
+
+```{r plot_wday_mean}
+# mean number of felony complaints by weekday
+daily_ts %>%
+  group_by(wday) %>%
+  summarise(mean_complaints = mean(Total)) %>%
+  ggplot(aes(x = wday, y = mean_complaints)) +
+  geom_col(fill = "steelblue") +
+  labs(
+    title = "Average Daily Felony Complaints by Weekday",
+    subtitle = "Shows weekly seasonal pattern in Brooklyn felony complaints",
+    x = "Day of Week",
+    y = "Average Number of Complaints"
+  ) +
+  theme_minimal()
+```
+
+```{r fill_gaps}
+
+# fill missing dates with Total = 0
+daily_ts <- daily_ts %>%
+  tsibble::fill_gaps(Total = 0)
+```
+
+```{r plot_weekly_season, warning=FALSE, message=FALSE}
+feasts::gg_season(daily_ts, Total) +
+  labs(
+    title = "Weekly Seasonal Plot of Daily Felony Complaints",
+    subtitle = "Visualizing patterns across weeks for Brooklyn felony incidents",
+    x = "Week of Year",
+    y = "Number of Complaints"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
