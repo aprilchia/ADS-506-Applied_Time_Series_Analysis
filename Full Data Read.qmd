@@ -1,0 +1,124 @@
+---
+title: "ADS 506 Final Project Data Play"
+author: "Katie Kimberling"
+format: pdf
+editor: visual
+---
+
+## Running Code
+
+```{r}
+library(readr)
+library(fpp3)
+library(patchwork)
+library(ggtime)
+library(RSocrata)
+```
+
+```{r}
+# -----------------------------------------------------------------------------
+# Accessing raw data via API (millions of records)
+# and selecting only Brooklyn felonies for download/analysis
+# -----------------------------------------------------------------------------
+
+# Build the query URL with SoDA filters (per the NYPD OpenData website)
+base_url <- "https://data.cityofnewyork.us/resource/qgea-i56i.csv"
+
+# Using SoQL (Socrata Query Language) to filter server-side
+# Filter for Brooklyn AND Felony-level crimes directly in the API call
+# Only select the columns we need (complaint date, complaint time of day)
+# Dramatically reduces amount of data transferred
+query_url <- paste0(
+  base_url,
+  "?$where=boro_nm='BROOKLYN' AND law_cat_cd='FELONY'",
+  "&$select=cmplnt_fr_dt, cmplnt_fr_tm"
+)
+
+# Read the filtered data - RSocrata handles pagination automatically
+brooklyn_felonies <- read.socrata(query_url)
+
+# Check the result
+head(brooklyn_felonies)
+str(brooklyn_felonies)
+cat("Number of Brooklyn felony records:", nrow(brooklyn_felonies), "\n")
+
+# Write the data to a .csv we can use for analysis among us
+write_csv(brooklyn_felonies, "brooklyn_felonies_filtered.csv")
+
+# Give a check-in message that filtered dataset has been saved
+cat("Saved", nrow(brooklyn_felonies), "rows to brooklyn_felonies_filtered.csv\n")
+
+```
+
+```{r}
+# -----------------------------------------------------------------------------
+# Process into daily counts time series
+# -----------------------------------------------------------------------------
+
+# Read the filtered CSV (containing just felonies in Brooklyn)
+#brooklyn_fels_filtered <- read_csv("/Users/katherinekimberling/ADS 506/Final Project/brooklyn_felonies_filtered.csv")
+
+# Clean up the data and extract date/hour components
+brooklyn_clean <- brooklyn_felonies |>
+  mutate(
+    felony_date = as_date(cmplnt_fr_dt),
+    felony_hour = hour(cmplnt_fr_dt)
+  ) |>
+  filter(!is.na(felony_date))
+
+# The data had dates that made no sense - filtered out all dates
+# prior to 2006 (which is where the real meat of reporting started) - 
+# so getting rid of felonies from the Battle of Hastings and the Revolutionary War
+brooklyn_clean <- brooklyn_clean |>
+  filter(felony_date >= "2006-01-01")
+
+# Daily counts of felonies tsibble (main time series for analysis)
+daily_counts <- brooklyn_clean |>
+  count(felony_date, name = "felony_count") |>
+  arrange(felony_date) |>
+  as_tsibble(index = felony_date) |>
+  fill_gaps(felony_count = 0)
+
+# Hourly counts of felonies by day (for drilling into hourly patterns)
+hourly_counts <- brooklyn_clean |>
+  count(felony_date, felony_hour, name = "felony_count") |>
+  arrange(felony_date, felony_hour)
+
+# Check results
+head(hourly_counts)
+
+# Save all for the team
+write_csv(brooklyn_felonies, "brooklyn_felonies_filtered.csv")
+write_csv(daily_counts, "brooklyn_felonies_daily.csv")
+write_csv(hourly_counts, "brooklyn_felonies_hourly.csv")
+
+# Save the DAILY data tsibble as RDS
+saveRDS(daily_counts, "/Users/katherinekimberling/ADS 506/Final Project/brooklyn_felonies_daily.rds")
+```
+
+```{r}
+daily_counts |>
+  autoplot(felony_count) +
+  labs(
+    title = "Brooklyn Felonies Over Time",
+    x = "Date",
+    y = "Number of Felonies"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
