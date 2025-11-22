@@ -1,0 +1,305 @@
+---
+title: "ADS 506 Final Project Team 1 - Module 5 Data Story"
+author: "Katie Kimberling"
+format: pdf
+editor: visual
+---
+
+## Data Story Arc
+
+```{r}
+library(readr)
+library(fpp3)
+library(patchwork)
+library(ggtime)
+library(readr)
+# library(RSocrata)
+```
+
+```{r}
+# Read the raw filtered data
+brooklyn_raw <- read_csv("brooklyn_felonies_filtered.csv")
+
+# Rebuild with correct hour extraction from cmplnt_fr_tm
+brooklyn_clean <- brooklyn_raw |>
+  mutate(
+    felony_date = as_date(cmplnt_fr_dt),
+    felony_hour = hour(cmplnt_fr_tm)
+  ) |>
+  filter(!is.na(felony_date)) |>
+  filter(felony_date >= "2006-01-01")
+
+# Verify hours are now distributed 0-23
+brooklyn_clean |> count(felony_hour)
+
+# Rebuild hourly counts
+hourly_counts <- brooklyn_clean |>
+  count(felony_date, felony_hour, name = "felony_count") |>
+  arrange(felony_date, felony_hour)
+
+# Check it
+head(hourly_counts)
+```
+
+```{r}
+# Read and inspect
+daily_counts <- read_csv("/Users/katherinekimberling/ADS 506/Final Project/ADS 506 Final Project/brooklyn_felonies_daily.csv")
+
+hourly_counts <- read_csv("/Users/katherinekimberling/ADS 506/Final Project/ADS 506 Final Project/brooklyn_felonies_hourly.csv")
+
+# Quick inspection
+head(daily_counts)
+head(hourly_counts)
+```
+
+```{r}
+# Convert to tsibble
+daily_counts <- daily_counts |>
+  as_tsibble(index = felony_date)
+
+# Now plot
+daily_counts |>
+  autoplot(felony_count) +
+  labs(
+    title = "Brooklyn Felonies Over Time",
+    x = "Date",
+    y = "Number of Felonies"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# -----------------------------------------------------------------------------
+# THE BIG PICTURE: What are we looking at?
+# -----------------------------------------------------------------------------
+
+# Basic summary stats
+daily_counts |>
+  summarize(
+    start_date = min(felony_date),
+    end_date = max(felony_date),
+    total_days = n(),
+    total_felonies = sum(felony_count),
+    avg_per_day = round(mean(felony_count), 1),
+    median_per_day = median(felony_count),
+    min_per_day = min(felony_count),
+    max_per_day = max(felony_count),
+    sd_per_day = round(sd(felony_count), 1)
+  )
+```
+
+```{r}
+# -----------------------------------------------------------------------------
+# YEARLY TRENDS: Is crime going up or down?
+# -----------------------------------------------------------------------------
+
+yearly_summary <- daily_counts |>
+  as_tibble() |>  # Add this line!
+  mutate(year = year(felony_date)) |>
+  group_by(year) |>
+  summarize(felony_count = sum(felony_count)) |>
+  mutate(
+    avg_per_day = felony_count / if_else(
+      year == year(Sys.Date()),
+      yday(Sys.Date()),
+      365
+    )
+  )
+
+# Check - should be ~19 rows (one per year)
+print(yearly_summary)
+
+# Now plot
+ggplot(yearly_summary, aes(x = year, y = felony_count)) +
+  geom_col(fill = "steelblue") +
+  geom_text(aes(label = scales::comma(felony_count)), vjust = -0.5, size = 2.5) +
+  labs(
+    title = "Total Brooklyn Felonies by Year",
+    subtitle = "How has felony volume changed over time?",
+    x = "Year",
+    y = "Total Felonies"
+  ) +
+  scale_y_continuous(labels = scales::comma, expand = expansion(mult = c(0, 0.1))) +
+  theme_minimal()
+```
+
+```{r}
+# -----------------------------------------------------------------------------
+# SEASONALITY: When do felonies peak?
+# -----------------------------------------------------------------------------
+
+# Monthly patterns - convert to tibble first
+monthly_pattern <- daily_counts |>
+  as_tibble() |>  # Convert from tsibble to regular tibble
+  mutate(month = month(felony_date, label = TRUE)) |>
+  group_by(month) |>
+  summarize(total = sum(felony_count)) |>
+  mutate(avg_per_month = total / n_distinct(year(daily_counts$felony_date)))
+
+# Check - should now be 12 rows
+print(monthly_pattern)
+
+ggplot(monthly_pattern, aes(x = month, y = avg_per_month)) +
+  geom_col(fill = "steelblue") +
+  geom_text(aes(label = round(avg_per_month, 0)), vjust = -0.5, size = 3) +
+  labs(
+    title = "Average Brooklyn Felonies by Month",
+    subtitle = "Is there a seasonal pattern?",
+    x = "Month",
+    y = "Average Felonies"
+  ) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+  theme_minimal()
+
+# Day of week patterns - convert to tibble first
+dow_pattern <- daily_counts |>
+  as_tibble() |>  # Convert from tsibble to regular tibble
+  mutate(day_of_week = wday(felony_date, label = TRUE, week_start = 1)) |>
+  group_by(day_of_week) |>
+  summarize(total = sum(felony_count)) |>
+  mutate(avg_per_dow = total / n_distinct(daily_counts$felony_date) * 7)
+
+# Check - should now be 7 rows
+print(dow_pattern)
+
+ggplot(dow_pattern, aes(x = day_of_week, y = avg_per_dow)) +
+  geom_col(fill = "steelblue") +
+  geom_text(aes(label = round(avg_per_dow, 0)), vjust = -0.5, size = 3) +
+  labs(
+    title = "Average Brooklyn Felonies by Day of Week",
+    subtitle = "Are certain days more dangerous?",
+    x = "Day of Week",
+    y = "Average Felonies"
+  ) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+  theme_minimal()
+
+```
+
+```{r}
+# -----------------------------------------------------------------------------
+# HOURLY PATTERNS: When during the day do felonies occur?
+# -----------------------------------------------------------------------------
+# Read the raw filtered data (has both date and time columns)
+brooklyn_raw <- read_csv("brooklyn_felonies_filtered.csv")
+
+# Rebuild with correct hour extraction from cmplnt_fr_tm
+brooklyn_clean <- brooklyn_raw |>
+  mutate(
+    felony_date = as_date(cmplnt_fr_dt),
+    felony_hour = hour(cmplnt_fr_tm)
+  ) |>
+  filter(!is.na(felony_date)) |>
+  filter(felony_date >= "2006-01-01")
+
+# Verify hours are now 0-23
+brooklyn_clean |> count(felony_hour)
+
+# Rebuild hourly counts
+hourly_counts <- brooklyn_clean |>
+  count(felony_date, felony_hour, name = "felony_count") |>
+  arrange(felony_date, felony_hour)
+
+# Now create the hourly pattern
+hourly_pattern <- hourly_counts |>
+  filter(!is.na(felony_hour)) |>
+  group_by(felony_hour) |>
+  summarize(total = sum(felony_count)) |>
+  mutate(avg_per_hour = total / n_distinct(hourly_counts$felony_date))
+
+# Plot
+ggplot(hourly_pattern, aes(x = felony_hour, y = avg_per_hour)) +
+  geom_col(fill = "steelblue") +
+  geom_text(aes(label = round(avg_per_hour, 1)), vjust = -0.5, size = 3) +
+  labs(
+    title = "Average Brooklyn Felonies by Hour of Day",
+    subtitle = "What time of day are felonies most common?",
+    x = "Hour (0 = midnight, 12 = noon)",
+    y = "Average Felonies"
+  ) +
+  scale_x_continuous(breaks = seq(0, 23, by = 2)) +
+  theme_minimal()
+```
+
+```{r}
+# -----------------------------------------------------------------------------
+# NOTABLE EVENTS: What were the extremes?
+# -----------------------------------------------------------------------------
+
+# Highest felony days
+daily_counts |>
+  as_tibble() |>
+  slice_max(felony_count, n = 10) |>
+  mutate(day_of_week = wday(felony_date, label = TRUE))
+
+# Lowest felony days (excluding zeros if any)
+daily_counts |>
+  as_tibble() |>
+  filter(felony_count > 0) |>
+  slice_min(felony_count, n = 10) |>
+  mutate(day_of_week = wday(felony_date, label = TRUE))
+```
+
+```{r}
+# -----------------------------------------------------------------------------
+# COVID IMPACT: What happened in 2020?
+# -----------------------------------------------------------------------------
+
+# Compare pre-COVID, COVID, and post-COVID periods
+covid_comparison <- daily_counts |>
+  as_tibble() |>
+  mutate(
+    period = case_when(
+      felony_date < "2020-03-15" ~ "Pre-COVID",
+      felony_date >= "2020-03-15" & felony_date < "2021-07-01" ~ "COVID",
+      TRUE ~ "Post-COVID"
+    ),
+    period = factor(period, levels = c("Pre-COVID", "COVID", "Post-COVID"))
+  ) |>
+  group_by(period) |>
+  summarize(
+    days = n(),
+    total_felonies = sum(felony_count),
+    avg_per_day = round(mean(felony_count), 1),
+    .groups = "drop"
+  )
+
+print(covid_comparison)
+
+# Visualize the COVID dip
+daily_counts |>
+  filter(felony_date >= "2019-01-01", felony_date <= "2021-12-31") |>
+  ggplot(aes(x = felony_date, y = felony_count)) +
+  geom_line() +
+  geom_vline(xintercept = as.Date("2020-03-15"), color = "red", linetype = "dashed") +
+  annotate("text", x = as.Date("2020-03-15"), y = 250,
+           label = "COVID Lockdown", hjust = -0.1, color = "red") +
+  labs(
+    title = "Brooklyn Felonies: The COVID Effect",
+    subtitle = "Daily felony counts 2019-2021",
+    x = "Date",
+    y = "Number of Felonies"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# -----------------------------------------------------------------------------
+# TIME SERIES DECOMPOSITION: What's the underlying structure?
+# -----------------------------------------------------------------------------
+
+# STL decomposition to see trend, seasonality, and remainder
+# Convert to tsibble and check it
+daily_ts <- daily_counts |>
+  as_tsibble(index = felony_date)
+
+# Check the tsibble
+print(daily_ts)
+
+# Try a simpler STL decomposition (just weekly seasonality)
+daily_ts |>
+  model(STL(felony_count ~ season(period = 7))) |>
+  components() |>
+  autoplot() +
+  labs(title = "Decomposition of Brooklyn Felonies Time Series")
+```
