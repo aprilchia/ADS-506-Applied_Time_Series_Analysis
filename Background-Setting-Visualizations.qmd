@@ -1,9 +1,11 @@
 ---
-title: "CompStat 7 NYPD Data"
+title: "Data Story Background/Setting"
 author: "Katie Kimberling"
 format: pdf
 editor: visual
 ---
+
+# Data Story Background/Setting
 
 ```{r}
 library(readr)
@@ -17,144 +19,15 @@ library(stringr)
 
 ```{r}
 # -----------------------------------------------------------------------------
-# Pull Brooklyn felony records from NYPD API (server-side filter)
-# There are 9.49 million records in the Historic data set, we only want
-# the felonies committed in Brooklyn 
-# (excluding misdemeanors, violations, or any other boroughs)
+# ACCESSING DATA AND CREATING TSIBBLES
 # -----------------------------------------------------------------------------
-base_url <- "https://data.cityofnewyork.us/resource/qgea-i56i.csv"
+felon_total <- read_csv("brooklyn_felonies_clean_records.csv")
+daily_total <- read_csv("daily_total_felonies.csv")
+hourly_total <- read_csv("hourly_total_felonies.csv")
+daily_by_cat <- read_csv("daily_felonies_by_category.csv")
+hourly_by_cat <- read_csv("hourly_felonies_by_category.csv")
 
-query_url <- paste0(
-  base_url,
-  "?$where=boro_nm='BROOKLYN' AND law_cat_cd='FELONY'",
-  "&$select=cmplnt_fr_dt, cmplnt_fr_tm, pd_cd, pd_desc"
-)
 
-brooklyn_raw <- read.socrata(query_url) |> 
-  as_tibble()
-
-# -----------------------------------------------------------------------------
-# Clean date/time and recode into major felony categories according to the
-# CompStat 7 major felony categories
-# -----------------------------------------------------------------------------
-brooklyn_clean <- brooklyn_raw |>
-  mutate(
-    # ensure class is Date
-    felony_date = as_date(cmplnt_fr_dt),
-
-    # parse time string and extract hour
-    felony_time = hms(cmplnt_fr_tm),
-    felony_hour = hour(felony_time),
-
-    # CompStat 7 major felonies from NYPD PD descriptions
-   felony_category = case_when(
-      # 1) Murder & Non-Negligent Manslaughter
-      str_detect(pd_desc, regex("MURDER|HOMICIDE|MANSLAUGHTER", ignore_case = TRUE)) ~
-        "Murder & Non-Negligent Manslaughter",
-
-      # 2) Rape
-      str_detect(
-        pd_desc,
-        regex("RAPE|SEXUAL ASSAULT|SEX ABUSE|SEXUAL ABUSE|SEXUAL MISCONDUCT|SEX CRIME",
-              ignore_case = TRUE)
-      ) ~ "Rape",
-
-      # 3) Robbery
-      str_detect(pd_desc, regex("\\bROBBERY\\b", ignore_case = TRUE)) ~ "Robbery",
-
-      # 4) Felony Assault
-      str_detect(
-        pd_desc,
-        regex("ASSAULT|STRANGULATION|AGGRAVATED HARASSMENT", ignore_case = TRUE)
-      ) ~ "Felony Assault",
-
-      # 5) Burglary
-      str_detect(pd_desc, regex("BURGLARY", ignore_case = TRUE)) ~ "Burglary",
-
-     # 6) Grand Larceny of Motor Vehicle - FIXED PATTERN!
-      str_detect(
-        pd_desc,
-        regex("LARCENY,GRAND OF AUTO|LARCENY,GRAND.*VEHICLE|LARCENY,GRAND.*MOTORCYCLE|UNAUTHORIZED USE VEHICLE|STOLEN PROPERTY.*MOTOR",
-              ignore_case = TRUE)
-      ) ~ "Grand Larceny of Motor Vehicle",
-
-      # 7) Grand Larceny (non-auto) - FIXED PATTERN!
-      str_detect(pd_desc, regex("LARCENY,GRAND", ignore_case = TRUE)) ~ "Grand Larceny",
-
-      # Everything else
-      TRUE ~ "Other Felony"
-    )
-  ) |>
-  filter(
-    !is.na(felony_date),
-    !is.na(felony_hour),
-    felony_date >= as_date("2006-01-01")
-  ) |>
-  select(felony_date, felony_hour, pd_cd, pd_desc, felony_category)
-write_csv(brooklyn_clean, "brooklyn_felonies_clean_records.csv")
-
-# -----------------------------------------------------------------------------
-# Create CSV and tsibble of the DAILY total felony counts
-# -----------------------------------------------------------------------------
-daily_total <- brooklyn_clean |>
-  count(felony_date, name = "felony_count") |>
-  arrange(felony_date)
-
-write_csv(daily_total, "daily_total_felonies.csv")
-
-daily_total_ts <- daily_total |>
-  as_tsibble(index = felony_date)
-
-# -----------------------------------------------------------------------------
-# Create CSV and tsibble of the HOURLY total felony counts
-# -----------------------------------------------------------------------------
-hourly_total <- brooklyn_clean |>
-  mutate(
-    felony_datetime = ymd_h(paste(felony_date, felony_hour))
-  ) |>
-  filter(!is.na(felony_datetime)) |>
-  count(felony_datetime, name = "felony_count") |>
-  arrange(felony_datetime)
-
-write_csv(hourly_total, "hourly_total_felonies.csv")
-
-hourly_total_ts <- hourly_total |>
-  as_tsibble(index = felony_datetime)
-
-# -----------------------------------------------------------------------------
-# Create CSV and tsibble of the DAILY felony counts by CompStat7 category
-# -----------------------------------------------------------------------------
-daily_by_cat <- brooklyn_clean |>
-  count(felony_date, felony_category, name = "felony_count") |>
-  arrange(felony_date, felony_category)
-
-write_csv(daily_by_cat, "daily_felonies_by_category.csv")
-
-daily_by_cat_ts <- daily_by_cat |>
-  as_tsibble(index = felony_date, key = felony_category)
-
-# -----------------------------------------------------------------------------
-# Create CSV and tsibble of the HOURLY felony counts by CompStat7 category
-# -----------------------------------------------------------------------------
-hourly_by_cat <- brooklyn_clean |>
-  mutate(
-    felony_datetime = ymd_h(paste(felony_date, felony_hour))
-  ) |>
-  filter(!is.na(felony_datetime)) |>
-  count(felony_datetime, felony_category, name = "felony_count") |>
-  arrange(felony_datetime, felony_category)
-
-write_csv(hourly_by_cat, "hourly_felonies_by_category.csv")
-
-hourly_by_cat_ts <- hourly_by_cat |>
-  as_tsibble(index = felony_datetime, key = felony_category)
-```
-
-```{r}
-# Check your categories
-brooklyn_clean |>
-  count(felony_category) |>
-  arrange(desc(n))
 ```
 
 ```{r}
