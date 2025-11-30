@@ -21,13 +21,11 @@ library(stringr)
 # -----------------------------------------------------------------------------
 # ACCESSING DATA AND CREATING TSIBBLES
 # -----------------------------------------------------------------------------
-felon_total <- read_csv("brooklyn_felonies_clean_records.csv")
-daily_total <- read_csv("daily_total_felonies.csv")
-hourly_total <- read_csv("hourly_total_felonies.csv")
-daily_by_cat <- read_csv("daily_felonies_by_category.csv")
-hourly_by_cat <- read_csv("hourly_felonies_by_category.csv")
-
-
+#felon_total <- read_csv("brooklyn_felonies_clean_records.csv")
+#daily_total <- read_csv("daily_total_felonies.csv")
+#hourly_total <- read_csv("hourly_total_felonies.csv")
+#daily_by_cat <- read_csv("daily_felonies_by_category.csv")
+#hourly_by_cat <- read_csv("hourly_felonies_by_category.csv")
 ```
 
 ```{r}
@@ -119,8 +117,8 @@ viz3_subseries
 # Purpose: Compare trends across felony categories
 # -----------------------------------------------------------------------------
 
-compstat7_ts <- daily_by_cat_ts |>
-  filter(felony_category != "Other Felony")
+#compstat7_ts <- daily_by_cat_ts |>
+  #filter(felony_category != "Other Felony")
 
 viz4_category_trends <- daily_by_cat_ts |>
   autoplot(felony_count) +
@@ -130,7 +128,7 @@ viz4_category_trends <- daily_by_cat_ts |>
     subtitle = "Daily counts for all 8 felony categories (free y-axis scales)",
     x = NULL,
     y = "Daily Count",
-    color = NULL,  # Remove legend title
+    color = NULL,
     caption = "Source: NYPD Historic Data"
   ) +
   theme_minimal(base_size = 12) +
