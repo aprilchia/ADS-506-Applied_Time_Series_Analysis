@@ -16,6 +16,7 @@ library(RSocrata)
 library(stringr)
 library(tidyverse)
 library(gt)
+library(fable.prophet)
 ```
 
 ## Exploratory Data Analysis
@@ -311,7 +312,9 @@ models <- train |>
    ensemble = (
      ARIMA((felony_count)) +
      ETS((felony_count)) +
-     TSLM((felony_count) ~ trend() + season())) / 3
+     TSLM((felony_count) ~ trend() + season())) / 3,
+   prophet = prophet(felony_count),
+   nnetar = NNETAR(felony_count)
  )
 
 models |> t()
