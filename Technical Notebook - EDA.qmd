@@ -67,7 +67,6 @@ daily_total_ts <- daily_total |>
 ```
 
 ```{r}
-
 # -----------------------------------------------------------------------------
 # View autoplot and ACF and PACF plots of daily total felonies
 # -----------------------------------------------------------------------------
@@ -104,196 +103,7 @@ daily_total_ts |>
 ```
 
 ```{r}
-# ----------EXPLORATORY DATA ANALYSIS------------------------------------------
-
-# -----------------------------------------------------------------------------
-# Clean date/time and recode into major felony categories according to the
-# CompStat 7 major felony categories
-# -----------------------------------------------------------------------------
-brooklyn_clean <- brooklyn_raw |>
-  mutate(
-    # ensure class is Date
-    felony_date = as_date(cmplnt_fr_dt),
-    felony_time = hms(cmplnt_fr_tm),
-    felony_hour = hour(felony_time),
-
-    # CompStat 7 major felonies from NYPD PD descriptions
-   felony_category = case_when(
-      # 1) Murder & Non-Negligent Manslaughter
-      str_detect(pd_desc, regex("MURDER|HOMICIDE|MANSLAUGHTER", ignore_case = TRUE)) ~
-        "Murder & Non-Negligent Manslaughter",
-
-      # 2) Rape
-      str_detect(
-        pd_desc,
-        regex("RAPE|SEXUAL ASSAULT|SEX ABUSE|SEXUAL ABUSE|SEXUAL MISCONDUCT|SEX CRIME",
-              ignore_case = TRUE)
-      ) ~ "Rape",
-
-      # 3) Robbery
-      str_detect(pd_desc, regex("\\bROBBERY\\b", ignore_case = TRUE)) ~ "Robbery",
-
-      # 4) Felony Assault
-      str_detect(
-        pd_desc,
-        regex("ASSAULT|STRANGULATION|AGGRAVATED HARASSMENT", ignore_case = TRUE)
-      ) ~ "Felony Assault",
-
-      # 5) Burglary
-      str_detect(pd_desc, regex("BURGLARY", ignore_case = TRUE)) ~ "Burglary",
-
-     # 6) Grand Larceny of Motor Vehicle - FIXED PATTERN!
-      str_detect(
-        pd_desc,
-        regex("LARCENY,GRAND OF AUTO|LARCENY,GRAND.*VEHICLE|LARCENY,GRAND.*MOTORCYCLE|UNAUTHORIZED USE VEHICLE|STOLEN PROPERTY.*MOTOR",
-              ignore_case = TRUE)
-      ) ~ "Grand Larceny of Motor Vehicle",
-
-      # 7) Grand Larceny (non-auto)
-      str_detect(pd_desc, regex("LARCENY,GRAND", ignore_case = TRUE)) ~ "Grand Larceny",
-
-      # Everything else
-      TRUE ~ "Other Felony"
-    )
-  ) |>
-  filter(
-    !is.na(felony_date),
-    !is.na(felony_hour),
-    felony_date >= as_date("2006-01-01")
-  ) |>
-  select(felony_date, felony_hour, pd_cd, pd_desc, felony_category)
-write_csv(brooklyn_clean, "brooklyn_felonies_clean_records.csv")
-
-# -----------------------------------------------------------------------------
-# Create CSV and tsibble of the DAILY total felony counts
-# -----------------------------------------------------------------------------
-daily_total <- brooklyn_clean |>
-  count(felony_date, name = "felony_count") |>
-  arrange(felony_date)
-
-write_csv(daily_total, "daily_total_felonies.csv")
-
-daily_total_ts <- daily_total |>
-  as_tsibble(index = felony_date)
-
-# -----------------------------------------------------------------------------
-# Create CSV and tsibble of the HOURLY total felony counts
-# -----------------------------------------------------------------------------
-hourly_total <- brooklyn_clean |>
-  mutate(
-    felony_datetime = ymd_h(paste(felony_date, felony_hour))
-  ) |>
-  filter(!is.na(felony_datetime)) |>
-  count(felony_datetime, name = "felony_count") |>
-  arrange(felony_datetime)
-
-write_csv(hourly_total, "hourly_total_felonies.csv")
-
-hourly_total_ts <- hourly_total |>
-  as_tsibble(index = felony_datetime)
-
-# -----------------------------------------------------------------------------
-# Create CSV and tsibble of the DAILY felony counts by CompStat7 category
-# -----------------------------------------------------------------------------
-daily_by_cat <- brooklyn_clean |>
-  count(felony_date, felony_category, name = "felony_count") |>
-  arrange(felony_date, felony_category)
-
-write_csv(daily_by_cat, "daily_felonies_by_category.csv")
-
-daily_by_cat_ts <- daily_by_cat |>
-  as_tsibble(index = felony_date, key = felony_category)
-
-# -----------------------------------------------------------------------------
-# Create CSV and tsibble of the HOURLY felony counts by CompStat7 category
-# -----------------------------------------------------------------------------
-hourly_by_cat <- brooklyn_clean |>
-  mutate(
-    felony_datetime = ymd_h(paste(felony_date, felony_hour))
-  ) |>
-  filter(!is.na(felony_datetime)) |>
-  count(felony_datetime, felony_category, name = "felony_count") |>
-  arrange(felony_datetime, felony_category)
-
-write_csv(hourly_by_cat, "hourly_felonies_by_category.csv")
-
-hourly_by_cat_ts <- hourly_by_cat |>
-  as_tsibble(index = felony_datetime, key = felony_category)
-```
-```{r}
-# Check categories
-brooklyn_clean |>
-  count(felony_category) |>
-  arrange(desc(n))
-```
-
-```{r}
-# ----------EXPLORATORY DATA ANALYSIS------------------------------------------
-
-# -----------------------------------------------------------------------------
-# Looking at ACF/PACF plots to determine if differencing is necessary
-#------------------------------------------------------------------------------
-
-# -----------------------------------------------------------------------------
-# ACF and PACF for DAILY total felonies
-# -----------------------------------------------------------------------------
-daily_acf <- daily_total_ts |>
-  ACF(felony_count, lag_max = 60) |>
-  autoplot() + 
-  ggtitle("Daily Total - ACF")
-
-daily_pacf <- daily_total_ts |>
-  PACF(felony_count, lag_max = 60) |>
-  autoplot() + 
-  ggtitle("Daily Total - PACF")
-
-daily_acf + daily_pacf
-
-# -----------------------------------------------------------------------------
-# ACF and PACF for DAILY by category (faceted)
-# First fill in the gaps with zeros for missing date/category combinations
-# -----------------------------------------------------------------------------
-daily_by_cat_ts <- daily_by_cat_ts |>
-  fill_gaps(felony_count = 0)
-
-daily_cat_acf <- daily_by_cat_ts |>
-  ACF(felony_count, lag_max = 60) |>
-  autoplot() + 
-  facet_wrap(~ felony_category, scales = "free_y") +
-  ggtitle("Daily by Category - ACF")
-
-daily_cat_pacf <- daily_by_cat_ts |>
-  PACF(felony_count, lag_max = 60) |>
-  autoplot() + 
-  facet_wrap(~ felony_category, scales = "free_y") +
-  ggtitle("Daily by Category - PACF")
-
-daily_cat_acf
-daily_cat_pacf
-
-# -----------------------------------------------------------------------------
-# ACF and PACF for HOURLY by category (faceted)
-# -----------------------------------------------------------------------------
-hourly_by_cat_ts <- hourly_by_cat_ts |>
-  fill_gaps(felony_count = 0)
-
-hourly_cat_acf <- hourly_by_cat_ts|>
-  ACF(felony_count, lag_max = 168) |>
-  autoplot() + 
-  facet_wrap(~ felony_category, scales = "free_y") +
-  ggtitle("Hourly by Category - ACF")
-
-hourly_cat_pacf <- hourly_by_cat_ts |>
-  PACF(felony_count, lag_max = 168) |>
-  autoplot() + 
-  facet_wrap(~ felony_category, scales = "free_y") +
-  ggtitle("Hourly by Category - PACF")
-
-hourly_cat_acf
-hourly_cat_pacf
-```
-
-```{r}
+#| message: false
 # -----------------------------------------------------------------------------
 # BACKGROUND/SETTING VISUALIZATIONS
 # -----------------------------------------------------------------------------
@@ -305,15 +115,13 @@ viz1_overall_trend <- daily_total_ts |>
   geom_smooth(aes(y = felony_count), method = "loess", span = 0.1, 
               color = "#d62828", linewidth = 1.2, se = TRUE) +
   labs(
-    title = "Brooklyn Felony Reports: Nearly Two Decades of Data",
-    subtitle = "Daily felony counts from 2006 to present",
+    title = "Daily Felony Counts From 2006 to Present",
     x = NULL,
-    y = "Daily Felony Count",
-    caption = "Source: NYPD Historic Data"
+    y = "Daily Felony Count"
   ) +
   theme_minimal(base_size = 13) +
   theme(
-    plot.title = element_text(face = "bold", size = 16),
+    plot.title = element_text(face = "bold", size = 12),
     panel.grid.minor = element_blank()
   )
 
@@ -333,13 +141,12 @@ viz2_seasonal <- daily_total_ts |>
     subtitle = "Each line represents one year, revealing consistent summer peaks",
     x = "Month",
     y = "Daily Felony Count",
-    color = "Year",
-    caption = "Source: NYPD Historic Data"
+    color = "Year"
   ) +
   theme_minimal(base_size = 13) +
   theme(
     plot.title = element_text(face = "bold", size = 16),
-    legend.position = "none"  # Too many years to show legend effectively
+    legend.position = "none"  
   )
 
 ggsave("02_seasonal_plot.png", viz2_seasonal, width = 12, height = 6, dpi = 300)
@@ -359,11 +166,10 @@ monthly_total_ts <- daily_total_ts |>
 viz3_subseries <- monthly_total_ts |>
   gg_subseries(felony_count, period = "year") +
   labs(
-    title = "Monthly Subseries: Summer Months See Higher Felony Rates",
-    subtitle = "Blue line shows the mean for each month across all years",
+    title = "Monthly Subseries",
+    subtitle = "Blue line --> mean for each month across all years",
     x = "Year",
-    y = "Monthly Felony Count",
-    caption = "Source: NYPD Historic Data"
+    y = "Monthly Felony Count"
   ) +
   theme_minimal(base_size = 11) +
   theme(
@@ -378,70 +184,32 @@ viz3_subseries
 
 ```{r}
 # -----------------------------------------------------------------------------
-# VISUALIZATION 4: Multiple Series - Using autoplot() with facets
-# Purpose: Compare trends across felony categories
-# -----------------------------------------------------------------------------
-
-compstat7_ts <- daily_by_cat_ts |>
-  filter(felony_category != "Other Felony")
-
-viz4_category_trends <- daily_by_cat_ts |>
-  autoplot(felony_count) +
-  facet_wrap(~ felony_category, ncol = 3, scales = "free_y") +
-  labs(
-    title = "Different Felony Categories Show Distinct Trends",
-    subtitle = "Daily counts for all 8 felony categories (free y-axis scales)",
-    x = NULL,
-    y = "Daily Count",
-    color = NULL,  # Remove legend title
-    caption = "Source: NYPD Historic Data"
-  ) +
-  theme_minimal(base_size = 12) +
-  theme(
-    plot.title = element_text(face = "bold", size = 16),
-    panel.grid.minor = element_blank(),
-    strip.text = element_text(face = "bold", size = 10),
-    legend.position = "bottom",
-    legend.direction = "horizontal",
-    legend.box = "horizontal",
-    legend.text = element_text(size = 9)
-  ) +
-  guides(color = guide_legend(nrow = 1))
-
-ggsave("04_category_trends_facet.png", viz4_category_trends, width = 12, height = 10, dpi = 300)
-viz4_category_trends
-```
-
-```{r}
-# -----------------------------------------------------------------------------
-# VISUALIZATON 5: ACF Plot - Using ACF() and autoplot()
+# VISUALIZATON 4: ACF Plot - Using ACF() and autoplot()
 # Purpose: Show autocorrelation to understand time dependencies
 # -----------------------------------------------------------------------------
 
-viz5_acf <- daily_total_ts |>
+viz4_acf <- daily_total_ts |>
   ACF(felony_count, lag_max = 365) |>
   autoplot() +
   scale_x_continuous(breaks = seq(0, 365, by = 30)) +  # Breaks every 30 days
   labs(
-    title = "Strong Weekly and Annual Patterns in Felony Data",
-    subtitle = "Autocorrelation reveals regular cycles (note peaks at 7, 14, 21 days and ~365 days)",
+    title = "One Year Autocorrrelation Plot",
     x = "Lag (days)",
-    y = "Autocorrelation (ACF)",
-    caption = "Source: NYPD Historic Data"
+    y = "Autocorrelation (ACF)"
   ) +
   theme_minimal(base_size = 13) +
   theme(
-    plot.title = element_text(face = "bold", size = 16),
+    plot.title = element_text(face = "bold", size = 12),
     axis.text.x = element_text(angle = 45, hjust = 1)
   )
 
-ggsave("05_acf_plot.png", viz5_acf, width = 12, height = 6, dpi = 300)
-viz5_acf
+ggsave("04_acf_plot.png", viz4_acf, width = 12, height = 6, dpi = 300)
+viz4_acf
 ```
 
 ```{r}
 # -----------------------------------------------------------------------------
-# VISUALIZATION 6: STL Decomposition - Using STL() and autoplot()
+# VISUALIZATION 5: STL Decomposition - Using STL() and autoplot()
 # Purpose: Separate trend, seasonal, and remainder components
 # -----------------------------------------------------------------------------
 
@@ -450,88 +218,49 @@ weekly_total_ts <- daily_total_ts |>
   index_by(week = ~ yearweek(.)) |>
   summarise(felony_count = sum(felony_count))
 
-viz6_stl <- weekly_total_ts |>
+viz5_stl <- weekly_total_ts |>
   model(
     STL(felony_count ~ trend(window = 21) + season(window = "periodic"))
   ) |>
   components() |>
   autoplot() +
   labs(
-    title = "Brooklyn Felonies Decomposed: Trend, Seasonality, and Noise",
-    subtitle = "STL decomposition reveals underlying patterns (weekly data)",
-    caption = "Source: NYPD Historic Data"
+    title = "Brooklyn Felonies Decomposed: Trend, Seasonality, and Noise"
   ) +
   theme_minimal(base_size = 13) +
   theme(
     plot.title = element_text(face = "bold", size = 16)
   )
 
-ggsave("06_stl_decomposition.png", viz6_stl, width = 12, height = 8, dpi = 300)
-viz6_stl
+ggsave("05_stl_decomposition.png", viz5_stl, width = 12, height = 8, dpi = 300)
+viz5_stl
 ```
 
 ```{r}
 # -----------------------------------------------------------------------------
-# VISUALIZATION 7: Lag Plot - Using gg_lag()
+# VISUALIZATION 6: Lag Plot - Using gg_lag()
 # Purpose: Visualize relationship between observations and their lags
 # -----------------------------------------------------------------------------
 
-viz7_lag <- daily_total_ts |>
+viz6_lag <- daily_total_ts |>
   gg_lag(felony_count, lags = 1:9, geom = "point") +
   labs(
     title = "Lag Plots Reveal Strong Day-to-Day Persistence",
-    subtitle = "Each panel shows felony count vs. count N days prior",
-    caption = "Source: NYPD Historic Data"
+    subtitle = "Each panel shows felony count vs. count N days prior"
   ) +
   theme_minimal(base_size = 11) +
   theme(
     plot.title = element_text(face = "bold", size = 16)
   )
 
-ggsave("07_lag_plots.png", viz7_lag, width = 12, height = 8, dpi = 300)
-viz7_lag
+ggsave("06_lag_plots.png", viz6_lag, width = 12, height = 8, dpi = 300)
+viz6_lag
 ```
+
 
 ```{r}
 # -----------------------------------------------------------------------------
-# VISUALIZATION 8: Feature Analysis - Using features() from feasts
-# Purpose: Statistical summary of time series characteristics by category
-# -----------------------------------------------------------------------------
-
-# Calculate features for each category (using all 8 categories)
-ts_features <- daily_by_cat_ts |>
-  features(felony_count, feature_set(pkgs = "feasts"))
-
-# Check what features are available and select meaningful ones
-# Common features: trend_strength, seasonal_strength_week, seasonal_strength_year, etc.
-
-viz8_features <- ts_features |>
-  ggplot(aes(x = trend_strength, y = seasonal_strength_week, 
-             color = felony_category, label = felony_category)) +
-  geom_point(size = 5, alpha = 0.8) +
-  geom_text(hjust = -0.1, vjust = -0.7, size = 3.5, fontface = "bold") +
-  scale_x_continuous(limits = c(0.15, 0.75), breaks = seq(0.2, 0.7, by = 0.1)) +
-  scale_y_continuous(limits = c(0.15, 0.55), breaks = seq(0.2, 0.5, by = 0.1)) +
-  labs(
-    title = "Time Series Characteristics by Felony Category",
-    subtitle = "Trend strength vs. seasonal strength (weekly patterns)",
-    x = "Trend Strength",
-    y = "Seasonal Strength (Weekly)",
-    caption = "Source: NYPD Historic Data | Calculated using feasts package"
-  ) +
-  theme_minimal(base_size = 13) +
-  theme(
-    plot.title = element_text(face = "bold", size = 16),
-    legend.position = "none"
-  )
-
-ggsave("08_ts_features.png", viz8_features, width = 12, height = 8, dpi = 300)
-viz8_features
-```
-
-```{r}
-# -----------------------------------------------------------------------------
-# VISUALIZATION 9: Time of Day Analysis (Hourly patterns)
+# VISUALIZATION 7: Time of Day Analysis (Hourly patterns)
 # -----------------------------------------------------------------------------
 
 # Create a "time of day" tsibble aggregated across all dates
@@ -540,7 +269,7 @@ hourly_pattern_ts <- brooklyn_clean |>
   mutate(hour = as.integer(felony_hour)) |>
   as_tsibble(index = hour)
 
-viz9_hourly <- hourly_pattern_ts |>
+viz7_hourly <- hourly_pattern_ts |>
   autoplot(total_count) +
   geom_col(aes(y = total_count), fill = "#457b9d", alpha = 0.8) +
   scale_x_continuous(breaks = seq(0, 23, 2)) +
@@ -548,8 +277,7 @@ viz9_hourly <- hourly_pattern_ts |>
     title = "Brooklyn Felonies Peak in Late Night Hours",
     subtitle = "Total felony reports by hour of day (2006-present)",
     x = "Hour of Day (0 = Midnight, 12 = Noon)",
-    y = "Total Felony Count",
-    caption = "Source: NYPD Historic Data"
+    y = "Total Felony Count"
   ) +
   theme_minimal(base_size = 13) +
   theme(
@@ -557,8 +285,8 @@ viz9_hourly <- hourly_pattern_ts |>
     panel.grid.minor = element_blank()
   )
 
-ggsave("09_hourly_patterns.png", viz9_hourly, width = 12, height = 6, dpi = 300)
-viz9_hourly
+ggsave("07_hourly_patterns.png", viz7_hourly, width = 12, height = 6, dpi = 300)
+viz7_hourly
 ```
 
 ```{r}
@@ -569,39 +297,13 @@ summary_stats <- list(
   total_felonies = nrow(brooklyn_clean),
   date_range = paste(min(brooklyn_clean$felony_date), "to", max(brooklyn_clean$felony_date)),
   years_covered = as.numeric(max(brooklyn_clean$felony_date) - min(brooklyn_clean$felony_date)) / 365.25,
-  avg_daily = mean(daily_total_ts$felony_count),
-  peak_hour = hourly_pattern_ts$hour[which.max(hourly_pattern_ts$total_count)],
-  top_category = brooklyn_clean |> count(felony_category) |> slice_max(n, n = 1) |> pull(felony_category),
-  categories = unique(brooklyn_clean$felony_category)
+  avg_daily = mean(daily_total_ts$felony_count)
 )
 
-# Save summary stats and features
-write_rds(summary_stats, "summary_statistics.rds")
-write_csv(ts_features, "ts_features_by_category.csv")
-
-# Print summary for quick reference
+# Print summary 
 cat("\n=== BROOKLYN FELONY DATA SUMMARY ===\n")
 cat("Total Felonies:", scales::comma(summary_stats$total_felonies), "\n")
 cat("Date Range:", summary_stats$date_range, "\n")
 cat("Years Covered:", round(summary_stats$years_covered, 1), "\n")
 cat("Average Daily Count:", round(summary_stats$avg_daily, 1), "\n")
-cat("Peak Hour:", summary_stats$peak_hour, ":00\n")
-cat("Top Category:", as.character(summary_stats$top_category), "\n")
-cat("\n=== FPP3 VISUALIZATIONS SAVED ===\n")
-cat("01_overall_trend_autoplot.png      - Time series plot with trend\n")
-cat("02_seasonal_plot.png               - gg_season() showing annual patterns\n")
-cat("03_subseries_plot.png              - gg_subseries() by month\n")
-cat("04_category_trends_facet.png       - Faceted autoplot by category\n")
-cat("05_acf_plot.png                    - Autocorrelation analysis\n")
-cat("06_stl_decomposition.png           - STL trend/seasonal decomposition\n")
-cat("07_lag_plots.png                   - gg_lag() showing persistence\n")
-cat("08_ts_features.png                 - Feature analysis (trend vs seasonality)\n")
-cat("09_hourly_patterns.png             - Hour of day patterns\n")
-cat("\n=== TSIBBLE OBJECTS CREATED ===\n")
-cat("daily_total_ts        - Daily aggregated felonies\n")
-cat("daily_by_cat_ts       - Daily by category (key = felony_category)\n")
-cat("hourly_total_ts       - Hourly aggregated felonies\n")
-cat("hourly_by_cat_ts      - Hourly by category\n")
-cat("weekly_total_ts       - Weekly aggregated (for STL)\n")
-cat("\nReady for further fpp3 analysis (forecasting, models, etc.)\n")
 ```
