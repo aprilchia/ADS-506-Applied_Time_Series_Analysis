@@ -6,6 +6,7 @@ editor: visual
 ---
 
 ```{r}
+#| message: false
 library(readr)
 library(hms)
 library(fpp3)
@@ -13,17 +14,18 @@ library(patchwork)
 library(ggtime)
 library(RSocrata)
 library(stringr)
+library(tidyverse)
+library(gt)
 ```
 
-```{r}
-# ----------EXPLORATORY DATA ANALYSIS------------------------------------------
+## Exploratory Data Analysis
 
-# -----------------------------------------------------------------------------
+```{r}
+#| warning: false
 # Pull Brooklyn felony records from NYPD API (server-side filter)
 # There are 9.49 million records in the Historic data set, we only want
 # the felonies committed in Brooklyn 
 # (excluding misdemeanors, violations, or any other boroughs)
-# -----------------------------------------------------------------------------
 base_url <- "https://data.cityofnewyork.us/resource/qgea-i56i.csv"
 
 query_url <- paste0(
@@ -35,9 +37,7 @@ query_url <- paste0(
 brooklyn_raw <- read.socrata(query_url) |> 
   as_tibble()
 
-# -----------------------------------------------------------------------------
 # Clean date/time 
-# -----------------------------------------------------------------------------
 brooklyn_clean <- brooklyn_raw |>
   mutate(
     # ensure class is Date
@@ -53,9 +53,7 @@ brooklyn_clean <- brooklyn_raw |>
   select(felony_date, felony_hour, pd_cd, pd_desc)
 write_csv(brooklyn_clean, "brooklyn_felonies_clean_records.csv")
 
-# -----------------------------------------------------------------------------
 # Create CSV and tsibble of the DAILY total felony counts
-# -----------------------------------------------------------------------------
 daily_total <- brooklyn_clean |>
   count(felony_date, name = "felony_count") |>
   arrange(felony_date)
@@ -67,9 +65,8 @@ daily_total_ts <- daily_total |>
 ```
 
 ```{r}
-# -----------------------------------------------------------------------------
+#| warning: false
 # View autoplot and ACF and PACF plots of daily total felonies
-# -----------------------------------------------------------------------------
 daily_total_ts |>
   autoplot(felony_count) +
   labs(
@@ -102,14 +99,11 @@ daily_total_ts |>
   theme_minimal()
 ```
 
+## Background/setting visualizations
+
 ```{r}
 #| message: false
-# -----------------------------------------------------------------------------
-# BACKGROUND/SETTING VISUALIZATIONS
-# -----------------------------------------------------------------------------
-# VISUALIZATION 1: Overall Trend - Daily felony counts over time
-# Purpose: Show the big picture - how has crime evolved in Brooklyn?
-# -----------------------------------------------------------------------------
+# Visualization 1: Overall trend of daily felony counts over time
 viz1_overall_trend <- daily_total_ts |>
   autoplot(felony_count) +
   geom_smooth(aes(y = felony_count), method = "loess", span = 0.1, 
@@ -130,10 +124,7 @@ viz1_overall_trend
 ```
 
 ```{r}
-# -----------------------------------------------------------------------------
-# VISUALIZATION 2: Seasonal Plot - Using gg_season()
-# Purpose: Reveal within-year patterns and compare across years
-# -----------------------------------------------------------------------------
+# Visualization 2: Seasonal plot
 viz2_seasonal <- daily_total_ts |>
   gg_season(felony_count, period = "year") +
   labs(
@@ -154,11 +145,7 @@ viz2_seasonal
 ```
 
 ```{r}
-# -----------------------------------------------------------------------------
-# VISUALIZATION 3: Subseries Plot - Using gg_subseries() 
-# Purpose: Show average pattern by month with variation
-# -----------------------------------------------------------------------------
-
+# Visualization 3: Subseries Plot
 monthly_total_ts <- daily_total_ts |>
   index_by(year_month = ~ yearmonth(.)) |>
   summarise(felony_count = sum(felony_count))
@@ -183,11 +170,7 @@ viz3_subseries
 ```
 
 ```{r}
-# -----------------------------------------------------------------------------
-# VISUALIZATON 4: ACF Plot - Using ACF() and autoplot()
-# Purpose: Show autocorrelation to understand time dependencies
-# -----------------------------------------------------------------------------
-
+# Visualization 4: ACF Plot
 viz4_acf <- daily_total_ts |>
   ACF(felony_count, lag_max = 365) |>
   autoplot() +
@@ -208,10 +191,7 @@ viz4_acf
 ```
 
 ```{r}
-# -----------------------------------------------------------------------------
-# VISUALIZATION 5: STL Decomposition - Using STL() and autoplot()
-# Purpose: Separate trend, seasonal, and remainder components
-# -----------------------------------------------------------------------------
+# Visualization 5: STL Decomposition
 
 # Aggregate to weekly for cleaner decomposition
 weekly_total_ts <- daily_total_ts |>
@@ -237,11 +217,7 @@ viz5_stl
 ```
 
 ```{r}
-# -----------------------------------------------------------------------------
-# VISUALIZATION 6: Lag Plot - Using gg_lag()
-# Purpose: Visualize relationship between observations and their lags
-# -----------------------------------------------------------------------------
-
+# Visualization 6: Lag Plot
 viz6_lag <- daily_total_ts |>
   gg_lag(felony_count, lags = 1:9, geom = "point") +
   labs(
@@ -257,11 +233,8 @@ ggsave("06_lag_plots.png", viz6_lag, width = 12, height = 8, dpi = 300)
 viz6_lag
 ```
 
-
 ```{r}
-# -----------------------------------------------------------------------------
-# VISUALIZATION 7: Time of Day Analysis (Hourly patterns)
-# -----------------------------------------------------------------------------
+# Visualization 7: Time of day analysis (Hourly patterns)
 
 # Create a "time of day" tsibble aggregated across all dates
 hourly_pattern_ts <- brooklyn_clean |>
@@ -290,9 +263,7 @@ viz7_hourly
 ```
 
 ```{r}
-# -----------------------------------------------------------------------------
-# SUMMARY STATISTICS FOR STORY FRAMING
-# -----------------------------------------------------------------------------
+# Summary statistics
 summary_stats <- list(
   total_felonies = nrow(brooklyn_clean),
   date_range = paste(min(brooklyn_clean$felony_date), "to", max(brooklyn_clean$felony_date)),
@@ -301,9 +272,75 @@ summary_stats <- list(
 )
 
 # Print summary 
-cat("\n=== BROOKLYN FELONY DATA SUMMARY ===\n")
+cat("\nBrooklyn Felony Data Summary\n")
 cat("Total Felonies:", scales::comma(summary_stats$total_felonies), "\n")
 cat("Date Range:", summary_stats$date_range, "\n")
 cat("Years Covered:", round(summary_stats$years_covered, 1), "\n")
 cat("Average Daily Count:", round(summary_stats$avg_daily, 1), "\n")
 ```
+
+## Modeling
+
+```{r}
+#| warning: false
+# Create training/validation sets for the model
+train <- daily_total_ts |> 
+  filter_index("2006-01-01" ~ "2023-12-30")
+validation <- daily_total_ts |> 
+  filter_index("2024-01-01" ~ "2024-12-31")
+
+# Check stationarity
+train |> 
+  features(felony_count, c(unitroot_kpss, unitroot_ndiffs, unitroot_nsdiffs))
+
+# Plot differenced series and ACF/PACF plots 
+train |>
+ gg_tsdisplay(difference(felony_count), plot_type = "partial")
+```
+
+```{r}
+# Build models
+models <- train |>
+ model(
+   ets = ETS(felony_count),
+   tslm = TSLM(felony_count ~ trend() + season()),
+   arima_auto = ARIMA(felony_count),
+   ma1 = ARIMA(felony_count ~ pdq(0, 1, 1) + PDQ(0, 0, 1, period = 7)),
+   ar1 = ARIMA(felony_count ~ pdq(1, 1, 1) + PDQ(0, 0, 1, period = 7)),
+   snaive = SNAIVE(felony_count),
+   ensemble = (
+     ARIMA((felony_count)) +
+     ETS((felony_count)) +
+     TSLM((felony_count) ~ trend() + season())) / 3
+ )
+
+models |> t()
+```
+
+## Compare Models (training)
+
+```{r}
+#| message: false
+models |>
+  accuracy() |>
+  select(.model, RMSE, MAE, MAPE) |>
+  arrange(RMSE) |>
+  knitr::kable(digits = 1)
+```
+
+## Forecast
+
+```{r}
+#| warning: false
+# Forecast the validation period
+h_val <- nrow(validation)
+models_fc <- models |> forecast(h = h_val)
+
+# Review accuracy to select the best model
+models_fc |>
+  accuracy(validation) |>
+  select(.model, RMSE, MAE, MAPE) |>
+  arrange(RMSE) |>
+  knitr::kable(digits = 1)
+```
+
