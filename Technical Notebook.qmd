@@ -1,0 +1,309 @@
+---
+title: "Technical Notebook for Team 1 Final Project ADS 506"
+author: "Team 1"
+format: pdf
+editor: visual
+---
+
+```{r}
+library(readr)
+library(hms)
+library(fpp3)
+library(patchwork)
+library(ggtime)
+library(RSocrata)
+library(stringr)
+```
+
+```{r}
+# ----------EXPLORATORY DATA ANALYSIS------------------------------------------
+
+# -----------------------------------------------------------------------------
+# Pull Brooklyn felony records from NYPD API (server-side filter)
+# There are 9.49 million records in the Historic data set, we only want
+# the felonies committed in Brooklyn 
+# (excluding misdemeanors, violations, or any other boroughs)
+# -----------------------------------------------------------------------------
+base_url <- "https://data.cityofnewyork.us/resource/qgea-i56i.csv"
+
+query_url <- paste0(
+  base_url,
+  "?$where=boro_nm='BROOKLYN' AND law_cat_cd='FELONY'",
+  "&$select=cmplnt_fr_dt, cmplnt_fr_tm, pd_cd, pd_desc"
+)
+
+brooklyn_raw <- read.socrata(query_url) |> 
+  as_tibble()
+
+# -----------------------------------------------------------------------------
+# Clean date/time 
+# -----------------------------------------------------------------------------
+brooklyn_clean <- brooklyn_raw |>
+  mutate(
+    # ensure class is Date
+    felony_date = as_date(cmplnt_fr_dt),
+    felony_time = hms(cmplnt_fr_tm),
+    felony_hour = hour(felony_time)
+  ) |>
+  filter(
+    !is.na(felony_date),
+    !is.na(felony_hour),
+    felony_date >= as_date("2006-01-01")
+  ) |>
+  select(felony_date, felony_hour, pd_cd, pd_desc)
+write_csv(brooklyn_clean, "brooklyn_felonies_clean_records.csv")
+
+# -----------------------------------------------------------------------------
+# Create CSV and tsibble of the DAILY total felony counts
+# -----------------------------------------------------------------------------
+daily_total <- brooklyn_clean |>
+  count(felony_date, name = "felony_count") |>
+  arrange(felony_date)
+
+write_csv(daily_total, "daily_total_felonies.csv")
+
+daily_total_ts <- daily_total |>
+  as_tsibble(index = felony_date)
+```
+
+```{r}
+# -----------------------------------------------------------------------------
+# View autoplot and ACF and PACF plots of daily total felonies
+# -----------------------------------------------------------------------------
+daily_total_ts |>
+  autoplot(felony_count) +
+  labs(
+    title = "Daily Brooklyn Felony Counts",
+    x = "Date",
+    y = "Number of Felonies"
+  ) +
+  theme_minimal()
+
+daily_acf <- daily_total_ts |>
+  ACF(felony_count, lag_max = 60) |>
+  autoplot() + 
+  ggtitle("Daily Total - ACF")
+
+daily_pacf <- daily_total_ts |>
+  PACF(felony_count, lag_max = 60) |>
+  autoplot() + 
+  ggtitle("Daily Total - PACF")
+
+daily_acf + daily_pacf
+
+# STL Decomposition
+daily_total_ts |>
+  model(
+    STL(felony_count ~ trend(window = 21) + season(window = "periodic"))
+  ) |>
+  components() |>
+  autoplot() +
+  labs(title = "STL Decomposition - Daily Brooklyn Felonies") +
+  theme_minimal()
+```
+
+```{r}
+#| message: false
+# -----------------------------------------------------------------------------
+# BACKGROUND/SETTING VISUALIZATIONS
+# -----------------------------------------------------------------------------
+# VISUALIZATION 1: Overall Trend - Daily felony counts over time
+# Purpose: Show the big picture - how has crime evolved in Brooklyn?
+# -----------------------------------------------------------------------------
+viz1_overall_trend <- daily_total_ts |>
+  autoplot(felony_count) +
+  geom_smooth(aes(y = felony_count), method = "loess", span = 0.1, 
+              color = "#d62828", linewidth = 1.2, se = TRUE) +
+  labs(
+    title = "Daily Felony Counts From 2006 to Present",
+    x = NULL,
+    y = "Daily Felony Count"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 12),
+    panel.grid.minor = element_blank()
+  )
+
+ggsave("01_overall_trend_autoplot.png", viz1_overall_trend, width = 12, height = 6, dpi = 300)
+viz1_overall_trend
+```
+
+```{r}
+# -----------------------------------------------------------------------------
+# VISUALIZATION 2: Seasonal Plot - Using gg_season()
+# Purpose: Reveal within-year patterns and compare across years
+# -----------------------------------------------------------------------------
+viz2_seasonal <- daily_total_ts |>
+  gg_season(felony_count, period = "year") +
+  labs(
+    title = "Seasonal Patterns in Brooklyn Felonies",
+    subtitle = "Each line represents one year, revealing consistent summer peaks",
+    x = "Month",
+    y = "Daily Felony Count",
+    color = "Year"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    legend.position = "none"  
+  )
+
+ggsave("02_seasonal_plot.png", viz2_seasonal, width = 12, height = 6, dpi = 300)
+viz2_seasonal
+```
+
+```{r}
+# -----------------------------------------------------------------------------
+# VISUALIZATION 3: Subseries Plot - Using gg_subseries() 
+# Purpose: Show average pattern by month with variation
+# -----------------------------------------------------------------------------
+
+monthly_total_ts <- daily_total_ts |>
+  index_by(year_month = ~ yearmonth(.)) |>
+  summarise(felony_count = sum(felony_count))
+
+viz3_subseries <- monthly_total_ts |>
+  gg_subseries(felony_count, period = "year") +
+  labs(
+    title = "Monthly Subseries",
+    subtitle = "Blue line --> mean for each month across all years",
+    x = "Year",
+    y = "Monthly Felony Count"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)
+  )
+
+ggsave("03_subseries_plot.png", viz3_subseries, width = 12, height = 8, dpi = 300)
+viz3_subseries
+```
+
+```{r}
+# -----------------------------------------------------------------------------
+# VISUALIZATON 4: ACF Plot - Using ACF() and autoplot()
+# Purpose: Show autocorrelation to understand time dependencies
+# -----------------------------------------------------------------------------
+
+viz4_acf <- daily_total_ts |>
+  ACF(felony_count, lag_max = 365) |>
+  autoplot() +
+  scale_x_continuous(breaks = seq(0, 365, by = 30)) +  # Breaks every 30 days
+  labs(
+    title = "One Year Autocorrrelation Plot",
+    x = "Lag (days)",
+    y = "Autocorrelation (ACF)"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 12),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+ggsave("04_acf_plot.png", viz4_acf, width = 12, height = 6, dpi = 300)
+viz4_acf
+```
+
+```{r}
+# -----------------------------------------------------------------------------
+# VISUALIZATION 5: STL Decomposition - Using STL() and autoplot()
+# Purpose: Separate trend, seasonal, and remainder components
+# -----------------------------------------------------------------------------
+
+# Aggregate to weekly for cleaner decomposition
+weekly_total_ts <- daily_total_ts |>
+  index_by(week = ~ yearweek(.)) |>
+  summarise(felony_count = sum(felony_count))
+
+viz5_stl <- weekly_total_ts |>
+  model(
+    STL(felony_count ~ trend(window = 21) + season(window = "periodic"))
+  ) |>
+  components() |>
+  autoplot() +
+  labs(
+    title = "Brooklyn Felonies Decomposed: Trend, Seasonality, and Noise"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16)
+  )
+
+ggsave("05_stl_decomposition.png", viz5_stl, width = 12, height = 8, dpi = 300)
+viz5_stl
+```
+
+```{r}
+# -----------------------------------------------------------------------------
+# VISUALIZATION 6: Lag Plot - Using gg_lag()
+# Purpose: Visualize relationship between observations and their lags
+# -----------------------------------------------------------------------------
+
+viz6_lag <- daily_total_ts |>
+  gg_lag(felony_count, lags = 1:9, geom = "point") +
+  labs(
+    title = "Lag Plots Reveal Strong Day-to-Day Persistence",
+    subtitle = "Each panel shows felony count vs. count N days prior"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16)
+  )
+
+ggsave("06_lag_plots.png", viz6_lag, width = 12, height = 8, dpi = 300)
+viz6_lag
+```
+
+
+```{r}
+# -----------------------------------------------------------------------------
+# VISUALIZATION 7: Time of Day Analysis (Hourly patterns)
+# -----------------------------------------------------------------------------
+
+# Create a "time of day" tsibble aggregated across all dates
+hourly_pattern_ts <- brooklyn_clean |>
+  count(felony_hour, name = "total_count") |>
+  mutate(hour = as.integer(felony_hour)) |>
+  as_tsibble(index = hour)
+
+viz7_hourly <- hourly_pattern_ts |>
+  autoplot(total_count) +
+  geom_col(aes(y = total_count), fill = "#457b9d", alpha = 0.8) +
+  scale_x_continuous(breaks = seq(0, 23, 2)) +
+  labs(
+    title = "Brooklyn Felonies Peak in Late Night Hours",
+    subtitle = "Total felony reports by hour of day (2006-present)",
+    x = "Hour of Day (0 = Midnight, 12 = Noon)",
+    y = "Total Felony Count"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    panel.grid.minor = element_blank()
+  )
+
+ggsave("07_hourly_patterns.png", viz7_hourly, width = 12, height = 6, dpi = 300)
+viz7_hourly
+```
+
+```{r}
+# -----------------------------------------------------------------------------
+# SUMMARY STATISTICS FOR STORY FRAMING
+# -----------------------------------------------------------------------------
+summary_stats <- list(
+  total_felonies = nrow(brooklyn_clean),
+  date_range = paste(min(brooklyn_clean$felony_date), "to", max(brooklyn_clean$felony_date)),
+  years_covered = as.numeric(max(brooklyn_clean$felony_date) - min(brooklyn_clean$felony_date)) / 365.25,
+  avg_daily = mean(daily_total_ts$felony_count)
+)
+
+# Print summary 
+cat("\n=== BROOKLYN FELONY DATA SUMMARY ===\n")
+cat("Total Felonies:", scales::comma(summary_stats$total_felonies), "\n")
+cat("Date Range:", summary_stats$date_range, "\n")
+cat("Years Covered:", round(summary_stats$years_covered, 1), "\n")
+cat("Average Daily Count:", round(summary_stats$avg_daily, 1), "\n")
+```
