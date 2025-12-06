@@ -52,14 +52,11 @@ brooklyn_clean <- brooklyn_raw |>
     felony_date >= as_date("2006-01-01")
   ) |>
   select(felony_date, felony_hour, pd_cd, pd_desc)
-write_csv(brooklyn_clean, "brooklyn_felonies_clean_records.csv")
 
 # Create CSV and tsibble of the DAILY total felony counts
 daily_total <- brooklyn_clean |>
   count(felony_date, name = "felony_count") |>
   arrange(felony_date)
-
-write_csv(daily_total, "daily_total_felonies.csv")
 
 daily_total_ts <- daily_total |>
   as_tsibble(index = felony_date)
